@@ -6,9 +6,9 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { PUZZLES } from "./puzzles.js";
-import { Board, checkSolution, encodeEdges, decodeEdges, decodeAnswer } from "./board.js";
+import { Board, checkSolution, diagnose, encodeEdges, decodeEdges, decodeAnswer } from "./board.js";
 
-const VERSION = "v1.0";
+const VERSION = "v1.1";
 
 const firebaseConfig = {
   apiKey: "AIzaSyD4CIUitbAtrNVc9rwnojFrTPlljwzp1l4",
@@ -22,7 +22,8 @@ const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
 const auth = getAuth(fbApp);
 
-const DEFAULT_TIMES = [120, 120, 180, 180, 240, 240, 360, 360];
+// 단계: 연습1·연습2(3×3) → 1~8단계(4×4~7×7)
+const DEFAULT_TIMES = [60, 90, 120, 120, 180, 180, 240, 240, 360, 360];
 const DEFAULT_PTS = { first: 10, min: 3 };
 const GRACE_MS = 1500;          // 제출 시간 여유
 const EST = { serverTimestamps: "estimate" };
@@ -31,13 +32,59 @@ const EST = { serverTimestamps: "estimate" };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const levelInfo = (lv) => {
-  const L = PUZZLES[lv - 1];
-  return { size: `${L.w}×${L.h}`, kind: lv % 2 ? "숫자 많이" : "숫자 적게" };
+  const L = PUZZLES[lv - 1] || PUZZLES[0];
+  return { name: L.name, size: `${L.w}×${L.h}`, kind: L.kind, tut: !!L.tut };
 };
-const levelLabel = (lv) => { const i = levelInfo(lv); return `${lv}단계 · ${i.size} · ${i.kind}`; };
+const levelLabel = (lv) => { const i = levelInfo(lv); return `${i.name} · ${i.size} · ${i.kind}`; };
+// 방에 저장된 문제가 지금 퍼즐 묶음의 그 문제인지 (정답 보여 주기 전 확인)
+const answerOf = (r) => {
+  const L = r && PUZZLES[r.level - 1], P = L && L.puzzles[r.pid];
+  return P && r.puzzle && P.c === r.puzzle.c ? decodeAnswer(P.a) : null;
+};
 const fmtTime = (sec) => { sec = Math.max(0, Math.ceil(sec)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`; };
 const ms = (ts) => (ts && typeof ts.toMillis === "function" ? ts.toMillis() : null);
 document.querySelectorAll(".ver").forEach((el) => (el.textContent = VERSION));
+
+// 배경의 수학 기호
+(() => {
+  const syms = ["+", "−", "×", "÷", "=", "π", "√", "∑", "%", "∞", "△", "□", "○", "1", "2", "3", "0", "≠", "<", ">"];
+  const colors = ["#5b8def", "#ff7aa2", "#34c38f", "#ff9f43", "#a07cff"];
+  const bg = $("mathBg");
+  for (let i = 0; i < 26; i++) {
+    const sp = document.createElement("span");
+    sp.textContent = syms[i % syms.length];
+    sp.style.left = Math.random() * 96 + "%";
+    sp.style.top = Math.random() * 94 + "%";
+    sp.style.fontSize = 22 + Math.random() * 34 + "px";
+    sp.style.color = colors[i % colors.length];
+    sp.style.animationDelay = -Math.random() * 7 + "s";
+    bg.appendChild(sp);
+  }
+})();
+
+// 축하 꽃가루 (수학 기호 섞어서)
+function confetti() {
+  const box = $("confetti");
+  const colors = ["#5b8def", "#ff7aa2", "#34c38f", "#ffd166", "#ff9f43", "#a07cff"];
+  for (let i = 0; i < 46; i++) {
+    const el = document.createElement("i");
+    if (i % 4 === 0) { el.className = "sym"; el.textContent = ["+", "×", "=", "π", "★"][i % 5]; el.style.color = colors[i % colors.length]; }
+    else el.style.background = colors[i % colors.length];
+    el.style.left = Math.random() * 100 + "vw";
+    el.style.animationDuration = 1.6 + Math.random() * 1.6 + "s";
+    el.style.animationDelay = Math.random() * .4 + "s";
+    box.appendChild(el);
+    setTimeout(() => el.remove(), 3800);
+  }
+}
+
+function mascotMood(el, mood) {
+  if (!el) return;
+  el.classList.remove("jump", "sad", "bob");
+  void el.getBoundingClientRect();
+  el.classList.add(mood === "happy" ? "jump" : mood === "sad" ? "sad" : "bob");
+  if (mood !== "idle") setTimeout(() => { el.classList.remove("jump", "sad"); el.classList.add("bob"); }, 2000);
+}
 
 async function sha256(text) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -226,6 +273,7 @@ function renderStudent() {
   $("stLobby").classList.toggle("hidden", playing);
 
   if (playing) {
+    closePractice();
     if (ST.round !== r.round) {
       ST.round = r.round;
       let edges = new Set();
@@ -247,6 +295,8 @@ function renderStudent() {
       const t = resultText(res);
       msg.textContent = `${t.big} ${t.ok ? `+${res.points}점` : "0점"}`;
       msg.classList.add(t.ok ? "ok" : "bad");
+      if (t.ok && !stBoard.fill) stBoard.setFill(true);
+      celebrate(res);
     } else if (submitted) msg.textContent = "📮 제출 완료! 채점 중이에요…";
     else if (timeUp) { msg.textContent = "⏰ 시간 종료!"; msg.classList.add("bad"); }
     else msg.textContent = "";
@@ -257,17 +307,29 @@ function renderStudent() {
     if (t) {
       box.className = "result " + (t.ok ? "ok" : "bad");
       box.innerHTML = `<div class="big">${esc(t.big)}</div><div class="sm">${esc(t.sm)}</div>`;
+      celebrate(res);
     }
-    $("stWait").querySelector("p").textContent = r.round > 0 ? "다음 라운드를 기다리는 중이에요!" : "선생님이 시작하면 게임이 열려요!";
+    $("stBubble").textContent = t
+      ? (t.ok ? "덕분에 울타리 안에 쏙 들어왔어! 고마워 메에~ 🎉" : "괜찮아! 다음엔 꼭 해낼 수 있어. 연습하면서 기다리자!")
+      : r.round > 0 ? "다음 라운드를 기다리는 중이에요!" : "선생님이 시작하면 게임이 열려요!";
     // 지난 문제 정답 보여 주기
-    const showAns = r.status === "ended" && r.round > 0 && r.puzzle && PUZZLES[r.level - 1] && PUZZLES[r.level - 1].puzzles[r.pid];
-    $("stAnswerCard").hidden = !showAns;
-    if (showAns && stAnswerKey !== r.round) {
+    const ans = r.status === "ended" && r.round > 0 ? answerOf(r) : null;
+    $("stAnswerCard").hidden = !ans;
+    if (ans && stAnswerKey !== r.round) {
       stAnswerKey = r.round;
       stAnswerBoard.load(r.puzzle.w, r.puzzle.h, r.puzzle.c);
-      stAnswerBoard.showAnswer(decodeAnswer(PUZZLES[r.level - 1].puzzles[r.pid].a));
+      stAnswerBoard.showAnswer(ans);
     }
   }
+}
+
+// 라운드마다 한 번만 축하/위로
+let celebrated = null;
+function celebrate(res) {
+  if (!res || celebrated === res.round) return;
+  celebrated = res.round;
+  if (res.correct) { confetti(); mascotMood($("stMascot"), "happy"); }
+  else mascotMood($("stMascot"), "sad");
 }
 
 function renderStudentRank() {
@@ -336,6 +398,79 @@ $("toolSubmit").addEventListener("click", async () => {
 });
 
 // =====================================================================
+// 혼자 연습하기 (학생 기기에서만, 점수 없음)
+// =====================================================================
+const PR_LEVELS = [0, 1, 2];   // 연습1, 연습2, 1단계
+const PR_INTRO = [
+  "숫자는 그 칸을 둘러싼 울타리 개수야. 3이 있는 칸부터 울타리 3개를 쳐 볼까?",
+  "이번엔 숫자가 몇 개 빠졌어. 0 둘레에는 울타리를 치면 안 된다는 것도 기억해!",
+  "4×4에 도전! 끊기지 않는 하나의 울타리로 닫아야 해."
+];
+const PR_MSG = {
+  empty: "먼저 점과 점 사이를 톡 눌러 울타리를 그려 봐!",
+  branch: "한 점에서 울타리가 세 갈래로 갈라졌어. 울타리는 한 줄로만 이어져야 해!",
+  open: "울타리가 끊긴 곳이 있어. 끝과 끝이 꼭 만나도록 닫아 줘!",
+  clue: "깜빡이는 숫자를 봐! 그 칸을 둘러싼 울타리 개수가 숫자와 달라.",
+  multi: "울타리가 여러 개로 나뉘었어. 하나로 이어진 울타리여야 해!",
+  ok: "정답! 울타리 안에 쏙 들어왔어. 고마워 메에~ 🎉"
+};
+const PR = { lv: 0, idx: -1 };
+const prBoard = new Board($("prBoard"), { interactive: true, onChange: () => prSay(PR_INTRO[PR_LEVELS.indexOf(PR.lv)]) });
+let prLastMsg = "";
+function prSay(msg) {
+  if (msg === prLastMsg) return;
+  prLastMsg = msg; $("prMsg").textContent = msg;
+}
+function prSetTool(m) {
+  prBoard.setMode(m);
+  $("prDraw").classList.toggle("active", m === "draw");
+  $("prErase").classList.toggle("active", m === "erase");
+}
+function prLoad(lv) {
+  PR.lv = lv;
+  const L = PUZZLES[lv];
+  let i;
+  do { i = Math.floor(Math.random() * L.puzzles.length); } while (L.puzzles.length > 1 && i === PR.idx);
+  PR.idx = i;
+  prBoard.load(L.w, L.h, L.puzzles[i].c);
+  prBoard.setLocked(false);
+  prSetTool("draw");
+  prSay(PR_INTRO[PR_LEVELS.indexOf(lv)]);
+  $("prLevels").innerHTML = PR_LEVELS.map((x) => {
+    const I = levelInfo(x + 1);
+    return `<button class="pr-lv ${x === lv ? "active" : ""}" data-prlv="${x}">${I.tut ? "🐣 " : ""}${I.name} · ${I.size}</button>`;
+  }).join("");
+}
+function openPractice() {
+  $("practice").classList.remove("hidden");
+  prLoad(PR.lv);
+}
+function closePractice() { $("practice").classList.add("hidden"); }
+$("practiceBtn").addEventListener("click", openPractice);
+$("prClose").addEventListener("click", closePractice);
+$("prLevels").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-prlv]");
+  if (b) prLoad(Number(b.dataset.prlv));
+});
+$("prDraw").addEventListener("click", () => prSetTool("draw"));
+$("prErase").addEventListener("click", () => prSetTool("erase"));
+$("prClear").addEventListener("click", () => { prBoard.clear(); prSay(PR_INTRO[PR_LEVELS.indexOf(PR.lv)]); });
+$("prNext").addEventListener("click", () => prLoad(PR.lv));
+$("prCheck").addEventListener("click", () => {
+  const L = PUZZLES[PR.lv];
+  const d = diagnose(L.w, L.h, L.puzzles[PR.idx].c, prBoard.edges);
+  prLastMsg = "";
+  prSay(PR_MSG[d.reason]);
+  if (d.ok) {
+    prBoard.setFill(true); prBoard.setLocked(true);
+    confetti(); mascotMood($("prMascot"), "happy");
+  } else {
+    prBoard.setBad(d.reason === "clue" ? d.bad : []);
+    mascotMood($("prMascot"), "sad");
+  }
+});
+
+// =====================================================================
 // 교사
 // =====================================================================
 const T = { unsubs: [], room: null, players: [], graded: new Map(), queue: Promise.resolve(), ending: false, sel: null, boardKey: null, answer: false, tick: null };
@@ -394,7 +529,7 @@ async function startTeacher(code) {
   T.unsubs.push(onSnapshot(roomRef, (s) => {
     if (!s.exists()) return;
     T.room = s.data(EST);
-    if (T.sel === null) T.sel = T.room.level || 1;
+    if (T.sel === null || T.sel > PUZZLES.length) T.sel = Math.min(T.room.level || 1, PUZZLES.length);
     renderTeacher();
     gradePending();
   }));
@@ -407,7 +542,10 @@ async function startTeacher(code) {
 }
 
 const pRefOf = (id) => doc(db, "fence_rooms", T.code, "players", id);
-const times = () => (T.room && T.room.times) || DEFAULT_TIMES;
+const times = () => {
+  const t = T.room && T.room.times;
+  return Array.isArray(t) && t.length === PUZZLES.length ? t : DEFAULT_TIMES;
+};
 const pts = () => ({ ...DEFAULT_PTS, ...((T.room && T.room.pts) || {}) });
 
 function playerState(p, r) {
@@ -432,8 +570,8 @@ function renderTeacher() {
   // 단계 버튼
   $("levelBtns").innerHTML = PUZZLES.map((L, i) => {
     const lv = i + 1, info = levelInfo(lv);
-    return `<button class="level-btn ${lv === T.sel ? "active" : ""}" data-lv="${lv}" ${playing ? "disabled" : ""}>
-      <b>${lv}단계</b>${info.size}<br><small>${info.kind} · ${fmtTime(times()[i])}</small></button>`;
+    return `<button class="level-btn ${info.tut ? "tut" : ""} ${lv === T.sel ? "active" : ""}" data-lv="${lv}" ${playing ? "disabled" : ""}>
+      <b>${info.tut ? "🐣 " : ""}${info.name}</b>${info.size}<br><small>${info.kind} · ${fmtTime(times()[i])}</small></button>`;
   }).join("");
   $("timeLabel").textContent = fmtTime(times()[T.sel - 1]);
   $("timeMinus").disabled = $("timePlus").disabled = playing;
@@ -600,8 +738,10 @@ $("endBtn").addEventListener("click", async () => {
 $("answerBtn").addEventListener("click", () => {
   const r = T.room;
   if (!r || !r.puzzle) return;
+  const ans = answerOf(r);
+  if (!ans) return toast("이 라운드의 정답을 찾을 수 없어요.");
   T.answer = !T.answer;
-  tBoard.showAnswer(T.answer ? decodeAnswer(PUZZLES[r.level - 1].puzzles[r.pid].a) : null);
+  tBoard.showAnswer(T.answer ? ans : null);
   renderTeacher();
 });
 $("tPlayers").addEventListener("click", async (e) => {

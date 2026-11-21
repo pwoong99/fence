@@ -3,26 +3,51 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>울타리치기</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧩</text></svg>">
+<title>울타리치기 · 수학 퍼즐</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐑</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
+<!-- 마스코트 '셈양이' (수학 박사 양) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="sheep" viewBox="0 0 120 110">
+    <g fill="#5a6488">
+      <rect x="44" y="80" width="9" height="20" rx="4.5"/><rect x="58" y="82" width="9" height="20" rx="4.5"/>
+      <rect x="74" y="82" width="9" height="20" rx="4.5"/><rect x="88" y="80" width="9" height="20" rx="4.5"/>
+    </g>
+    <g fill="#fff" stroke="#dfe4f4" stroke-width="2.5">
+      <circle cx="96" cy="58" r="14"/><circle cx="84" cy="44" r="17"/><circle cx="66" cy="42" r="18"/>
+      <circle cx="50" cy="52" r="17"/><circle cx="56" cy="72" r="17"/><circle cx="78" cy="74" r="18"/><circle cx="96" cy="72" r="14"/>
+    </g>
+    <ellipse cx="78" cy="60" rx="24" ry="18" fill="#fff"/>
+    <ellipse cx="22" cy="49" rx="9" ry="5" fill="#ffc2d4" transform="rotate(-25 22 49)"/>
+    <ellipse cx="58" cy="49" rx="9" ry="5" fill="#ffc2d4" transform="rotate(25 58 49)"/>
+    <ellipse cx="40" cy="60" rx="18" ry="20" fill="#fde9da"/>
+    <g fill="#fff" stroke="#dfe4f4" stroke-width="2"><circle cx="32" cy="40" r="7"/><circle cx="41" cy="36" r="8"/><circle cx="50" cy="40" r="7"/></g>
+    <g fill="none" stroke="#5b8def" stroke-width="2.4"><circle cx="33" cy="59" r="6.5"/><circle cx="48" cy="59" r="6.5"/><path d="M39.5 58.5h2"/></g>
+    <circle cx="33" cy="59" r="2.6" fill="#3b3f58"/><circle cx="48" cy="59" r="2.6" fill="#3b3f58"/>
+    <circle cx="28" cy="68" r="3.4" fill="#ffb3c7"/><circle cx="53" cy="68" r="3.4" fill="#ffb3c7"/>
+    <path d="M37 70q3.5 3.5 7 0" fill="none" stroke="#3b3f58" stroke-width="2" stroke-linecap="round"/>
+    <text x="88" y="66" font-size="16" font-family="Jua, sans-serif" fill="#ff7aa2" text-anchor="middle">+</text>
+  </symbol>
+</svg>
+
+<div class="math-bg" id="mathBg" aria-hidden="true"></div>
+<div id="confetti" aria-hidden="true"></div>
+
 <!-- ===== 입장 화면 ===== -->
 <section id="entry" class="screen active">
   <div class="entry-card">
     <div class="logo">
-      <svg viewBox="0 0 120 70" class="logo-fence" aria-hidden="true">
-        <g fill="#c98a4b" stroke="#8b5a2b" stroke-width="3">
-          <path d="M10 64V18l8-10 8 10v46z"/><path d="M47 64V18l8-10 8 10v46z"/><path d="M84 64V18l8-10 8 10v46z"/>
-          <rect x="4" y="28" width="112" height="9" rx="3"/><rect x="4" y="46" width="112" height="9" rx="3"/>
-        </g>
-      </svg>
+      <div class="badge">∑ 수학 퍼즐</div>
       <h1>울타리치기</h1>
-      <p class="sub">숫자를 보고 끊기지 않는 하나의 울타리를 완성하세요!</p>
+      <div class="mascot-row">
+        <svg class="mascot bob"><use href="#sheep"/></svg>
+        <div class="bubble">숫자를 보고 나를 울타리 안에<br>쏙 넣어 줄래? 메에~</div>
+      </div>
     </div>
 
     <div class="tabs">
@@ -32,19 +57,19 @@
 
     <form id="studentForm" class="form">
       <label>방 번호 (4자리)
-        <input id="roomCode" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="예: 1234">
+        <input id="roomCode" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="1234">
       </label>
       <label>이름
         <input id="studentName" maxlength="10" autocomplete="off" placeholder="내 이름">
       </label>
-      <button type="submit" class="btn primary big">게임방 입장하기</button>
+      <button type="submit" class="btn primary big">게임방 입장하기 →</button>
     </form>
 
     <form id="teacherForm" class="form hidden">
       <label>선생님 비밀번호
-        <input id="teacherPw" type="password" inputmode="numeric" autocomplete="off" placeholder="비밀번호">
+        <input id="teacherPw" type="password" inputmode="numeric" autocomplete="off" placeholder="••••••••">
       </label>
-      <button type="submit" class="btn primary big">선생님으로 입장하기</button>
+      <button type="submit" class="btn primary big">선생님으로 입장하기 →</button>
     </form>
 
     <p id="entryMsg" class="msg"></p>
@@ -68,11 +93,12 @@
 
   <div id="stLobby" class="lobby">
     <div class="card wait-card">
-      <div id="stResult" class="result hidden"></div>
-      <div id="stWait" class="wait">
-        <div class="spinner"></div>
-        <p>선생님이 시작하면 게임이 열려요!</p>
+      <div class="wait-mascot">
+        <svg class="mascot bob" id="stMascot"><use href="#sheep"/></svg>
+        <div class="bubble" id="stBubble">선생님이 시작하면 게임이 열려요!</div>
       </div>
+      <div id="stResult" class="result hidden"></div>
+      <button class="btn sun big-ish" id="practiceBtn">🐑 기다리는 동안 혼자 연습하기</button>
     </div>
     <div class="lobby-grid">
       <div class="card" id="stAnswerCard" hidden>
@@ -84,10 +110,10 @@
         <ol id="stRankList" class="rank-list"></ol>
       </div>
       <div class="card rules">
-        <h3>📖 게임 방법</h3>
+        <h3>📐 게임 방법</h3>
         <ul>
           <li>점과 점 사이를 <b>톡 누르면</b> 울타리가 생겨요. 점을 따라 <b>쭉 그어도</b> 돼요.</li>
-          <li>칸 안의 숫자는 그 칸을 둘러싼 <b>울타리 개수</b>예요. (0~3)</li>
+          <li>칸 안의 숫자 = 그 칸을 둘러싼 <b>울타리 개수</b> (0~3)</li>
           <li>숫자가 없는 칸은 몇 개인지 알려 주지 않아요.</li>
           <li>울타리는 <b>끊기지 않고 하나로 닫혀야</b> 해요. 두 개로 나뉘면 안 돼요.</li>
           <li>모든 점을 쓸 필요는 없어요.</li>
@@ -113,11 +139,34 @@
   </div>
 </section>
 
+<!-- ===== 혼자 연습하기 ===== -->
+<div id="practice" class="overlay hidden">
+  <div class="practice-card">
+    <div class="pr-head">
+      <h2>🐑 혼자 연습하기</h2>
+      <button class="btn ghost small" id="prClose">닫기 ✕</button>
+    </div>
+    <div class="pr-levels" id="prLevels"></div>
+    <div class="pr-coach">
+      <svg class="mascot small-m" id="prMascot"><use href="#sheep"/></svg>
+      <div class="bubble" id="prMsg"></div>
+    </div>
+    <div class="board-wrap"><svg id="prBoard" class="board pr"></svg></div>
+    <div class="tools">
+      <button class="btn tool active" id="prDraw">✏️ 그리기</button>
+      <button class="btn tool" id="prErase">🧽 지우기</button>
+      <button class="btn tool" id="prClear">🗑️ 전체 지우기</button>
+      <button class="btn primary" id="prCheck">🔍 정답 확인</button>
+      <button class="btn sun" id="prNext">🔄 다른 문제</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===== 교사 화면 ===== -->
 <section id="teacher" class="screen">
   <header class="bar teacher-bar">
     <div class="bar-left">
-      <span class="t-title">🧩 울타리치기</span>
+      <span class="t-title"><svg class="mini-sheep"><use href="#sheep"/></svg>울타리치기</span>
       <span class="room-code">방 번호 <b id="tCode">----</b></span>
       <span class="chip">👥 <b id="tCount">0</b>명</span>
     </div>
@@ -136,7 +185,7 @@
         <h3>단계 고르기</h3>
         <div id="levelBtns" class="level-btns"></div>
         <div class="time-row">
-          <span>제한 시간</span>
+          <span>⏱ 제한 시간</span>
           <button class="btn round" id="timeMinus">−</button>
           <b id="timeLabel">2:00</b>
           <button class="btn round" id="timePlus">＋</button>

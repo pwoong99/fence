@@ -68,6 +68,41 @@ export function checkSolution(w, h, clues, set) {
   return seen.size === adj.size;
 }
 
+// 연습용 진단: 무엇이 틀렸는지 알려 줌
+export function diagnose(w, h, clues, set) {
+  const g = geo(w, h);
+  const bad = [];
+  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+    const ch = clues[r * w + c];
+    if (ch === "." || ch === undefined) continue;
+    if (g.cellEdges(r, c).filter((e) => set.has(e)).length !== Number(ch)) bad.push(r * w + c);
+  }
+  if (!set.size) return { ok: false, reason: "empty", bad };
+  const deg = new Map();
+  for (const e of set) for (const [r, c] of g.ends(e)) {
+    const k = r * (w + 1) + c; deg.set(k, (deg.get(k) || 0) + 1);
+  }
+  const degs = [...deg.values()];
+  if (degs.some((d) => d > 2)) return { ok: false, reason: "branch", bad };
+  if (degs.some((d) => d === 1)) return { ok: false, reason: "open", bad };
+  if (bad.length) return { ok: false, reason: "clue", bad };
+  if (!checkSolution(w, h, clues, set)) return { ok: false, reason: "multi", bad };
+  return { ok: true, reason: "ok", bad };
+}
+
+// 울타리 안쪽 칸 (왼쪽 세로 울타리 개수가 홀수면 안쪽)
+export function insideCells(w, h, set) {
+  const g = geo(w, h), out = [];
+  for (let r = 0; r < h; r++) {
+    let n = 0;
+    for (let c = 0; c < w; c++) {
+      if (set.has(g.vIdx(r, c))) n++;
+      if (n % 2) out.push([r, c]);
+    }
+  }
+  return out;
+}
+
 export class Board {
   constructor(svg, { interactive = false, onChange = null } = {}) {
     this.svg = svg;
@@ -77,6 +112,8 @@ export class Board {
     this.locked = false;
     this.edges = new Set();
     this.answer = null;
+    this.fill = false;
+    this.bad = [];
     if (interactive) this.bindPointer();
   }
 
@@ -85,6 +122,8 @@ export class Board {
     this.g = geo(w, h);
     this.edges = new Set(edges);
     this.answer = null;
+    this.fill = false;
+    this.bad = [];
     this.svg.setAttribute("viewBox", `0 0 ${w * S + 2 * M} ${h * S + 2 * M}`);
     this.draw();
   }
@@ -92,10 +131,12 @@ export class Board {
   setEdges(set) { this.edges = new Set(set); this.draw(); }
   setMode(m) { this.mode = m; this.svg.classList.toggle("erase-mode", m === "erase"); }
   setLocked(v) { this.locked = v; this.svg.classList.toggle("locked", v); }
-  showAnswer(set) { this.answer = set; this.draw(); }
+  showAnswer(set) { this.answer = set; this.fill = !!set; this.draw(); }
+  setFill(v) { this.fill = v; this.draw(); }
+  setBad(list) { this.bad = list || []; this.draw(); }
   clear() {
     if (!this.edges.size || this.locked) return;
-    this.edges.clear(); this.draw(); this.onChange && this.onChange(this.edges);
+    this.edges.clear(); this.fill = false; this.bad = []; this.draw(); this.onChange && this.onChange(this.edges);
   }
 
   pos(r, c) { return [M + c * S, M + r * S]; }
@@ -111,9 +152,29 @@ export class Board {
       parent.appendChild(el);
       return el;
     };
-    add("rect", { x: M - 18, y: M - 18, width: w * S + 36, height: h * S + 36, rx: 18, class: "bd-bg" });
+    add("rect", { x: M - 20, y: M - 20, width: w * S + 40, height: h * S + 40, rx: 22, class: "bd-bg" });
     const total = edgeCount(w, h);
     const show = this.answer || this.edges;
+    // 모눈 칸
+    for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+      const [x, y] = this.pos(r, c);
+      add("rect", { x: x + 3, y: y + 3, width: S - 6, height: S - 6, rx: 9, class: "bd-cell" });
+    }
+    // 울타리 안쪽 풀밭 + 양
+    if (this.fill) {
+      const cells = insideCells(w, h, show);
+      cells.forEach(([r, c]) => {
+        const [x, y] = this.pos(r, c);
+        add("rect", { x: x + 1, y: y + 1, width: S - 2, height: S - 2, rx: 6, class: "bd-in" });
+      });
+      const free = cells.filter(([r, c]) => this.clues[r * w + c] === ".");
+      const spot = (free.length ? free : cells)[0];
+      if (spot && free.length) {
+        const [x, y] = this.pos(spot[0], spot[1]);
+        const u = add("use", { href: "#sheep", x: x + 6, y: y + 8, width: S - 12, height: S - 14, class: "bd-sheep" });
+        u.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "#sheep");
+      }
+    }
     // 빈 자리(연한 점선)
     for (let e = 0; e < total; e++) {
       const [[r1, c1], [r2, c2]] = g.ends(e);
@@ -125,25 +186,29 @@ export class Board {
       const ch = this.clues[r * w + c];
       if (ch === ".") continue;
       const n = g.cellEdges(r, c).filter((e) => show.has(e)).length;
-      let cls = "bd-clue";
+      let cls = "bd-clue n" + ch;
       if (!this.answer) {
         if (n > Number(ch)) cls += " over";
         else if (n === Number(ch) && n > 0) cls += " done";
       }
+      if (this.bad.includes(r * w + c)) cls += " bad";
       const [x, y] = this.pos(r + 0.5, c + 0.5);
       const t = add("text", { x, y, class: cls });
       t.textContent = ch;
     }
-    // 울타리
+    // 울타리 (두 겹으로 그려 사탕 울타리처럼)
+    const cls = this.answer ? " answer" : "";
     for (const e of show) {
       const [[r1, c1], [r2, c2]] = g.ends(e);
       const [x1, y1] = this.pos(r1, c1), [x2, y2] = this.pos(r2, c2);
-      add("line", { x1, y1, x2, y2, class: this.answer ? "bd-edge answer" : "bd-edge" });
+      add("line", { x1, y1, x2, y2, class: "bd-edge" + cls });
+      add("line", { x1, y1, x2, y2, class: "bd-edge-in" + cls });
     }
     // 점
     for (let r = 0; r <= h; r++) for (let c = 0; c <= w; c++) {
       const [x, y] = this.pos(r, c);
-      add("circle", { cx: x, cy: y, r: 6.5, class: "bd-dot" });
+      add("circle", { cx: x, cy: y, r: 7.5, class: "bd-dot" });
+      add("circle", { cx: x - 2.2, cy: y - 2.2, r: 2.2, class: "bd-dot-hi" });
     }
   }
 
@@ -186,6 +251,7 @@ export class Board {
 
   apply(e) {
     if (e === null || e === undefined) return false;
+    this.bad = []; this.fill = false;
     if (this.mode === "draw") {
       if (this.edges.has(e)) return false;
       this.edges.add(e);
