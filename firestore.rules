@@ -1,0 +1,241 @@
+rules_version = '2';
+// webapp-hub 프로젝트 전체 보안 규칙 — 웹앱 모음 페이지 · 신대 시네마 스낵바(cgv) · AI수학투어(mathTour_) · 울타리치기(fence_)가 함께 써요.
+// 이 파일 하나를 Firebase 콘솔 → Firestore → 규칙에 통째로 붙여 넣고 「게시」하세요.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ───────── 웹앱 모음 페이지 ─────────
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email == 'pwoong99@ai.jne.kr'
+        && request.auth.token.email_verified == true;
+    }
+
+    // 페이지 제목·설명·분류 목록: 누구나 읽기, 관리자만 쓰기
+    match /meta/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 앱 목록: 숨긴 앱은 관리자만 읽기
+    // 일반 방문자는 공개 앱의 클릭 수를 1씩 올리는 것만 가능
+    match /apps/{appId} {
+      allow read: if isAdmin() || resource.data.hidden == false;
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        resource.data.hidden == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clicks'])
+        && request.resource.data.clicks == resource.data.get('clicks', 0) + 1
+      );
+    }
+
+    // 전체 방문 수: 누구나 1씩 올리기만 가능, 보기는 관리자만
+    match /stats/site {
+      allow read, delete: if isAdmin();
+      allow create: if request.resource.data.keys().hasOnly(['visits'])
+        && request.resource.data.visits == 1;
+      allow update: if request.resource.data.keys().hasOnly(['visits'])
+        && request.resource.data.visits == resource.data.visits + 1;
+    }
+
+    // 날짜별 방문 수 (문서 이름: 2026-11-05 형식)
+    match /daily/{day} {
+      allow read, delete: if isAdmin();
+      allow create: if day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.keys().hasOnly(['visits'])
+        && request.resource.data.visits == 1;
+      allow update: if request.resource.data.keys().hasOnly(['visits'])
+        && request.resource.data.visits == resource.data.visits + 1;
+    }
+
+    // ===== 신대 시네마 스낵바 (cgv/) — 워크숍 간식 주문 =====
+    // 주문: 누구나 보기·주문·취소, 고치기는 안 됨 (한 사람당 1만 원, 최대 3명)
+    match /cgvOrder_orders/{orderId} {
+      allow read, delete: if true;
+      allow update: if false;
+      allow create: if request.resource.data.keys().hasOnly(['names', 'people', 'items', 'total', 'memo', 'createdAt'])
+        && request.resource.data.names is list
+        && request.resource.data.names.size() >= 1
+        && request.resource.data.names.size() <= 3
+        && request.resource.data.people == request.resource.data.names.size()
+        && request.resource.data.items is list
+        && request.resource.data.items.size() >= 1
+        && request.resource.data.items.size() <= 40
+        && request.resource.data.total is int
+        && request.resource.data.total > 0
+        && request.resource.data.total <= request.resource.data.people * 10000
+        && request.resource.data.memo is string
+        && request.resource.data.memo.size() <= 100
+        && request.resource.data.createdAt == request.time
+        && (!exists(/databases/$(database)/documents/cgvOrder_meta/settings)
+            || get(/databases/$(database)/documents/cgvOrder_meta/settings).data.open != false);
+    }
+    // 설정: 주문 마감 여부, 판매 중지 메뉴
+    match /cgvOrder_meta/{docId} {
+      allow read: if true;
+      allow write: if docId == 'settings'
+        && request.resource.data.keys().hasOnly(['open', 'hidden'])
+        && request.resource.data.open is bool
+        && request.resource.data.hidden is list;
+    }
+
+    // ───────── AI수학투어 (mathTour_) ─────────
+    // 관리자: pwoong99@ai.jne.kr (이메일/비밀번호 로그인 또는 Google 로그인)
+    function isTourAdmin() {
+      return request.auth != null
+        && request.auth.token.email == 'pwoong99@ai.jne.kr'
+        && (request.auth.token.firebase.sign_in_provider == 'password'
+            || request.auth.token.email_verified == true);
+    }
+    function signedIn() { return request.auth != null; }
+    function mySession() {
+      return get(/databases/$(database)/documents/mathTour_sessions/$(request.auth.uid)).data;
+    }
+    // 이 기기가 그 팀으로 로그인했는지
+    function isTeam(teamId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/mathTour_sessions/$(request.auth.uid))
+        && mySession().teamId == teamId;
+    }
+    function tourConfig() {
+      return get(/databases/$(database)/documents/mathTour_config/main).data;
+    }
+
+    // 문제 목록·설정: 접속한 사람은 읽기, 관리자만 쓰기
+    match /mathTour_config/{docId} {
+      allow read: if signedIn();
+      allow write: if isTourAdmin();
+    }
+
+    // 로그인 화면의 학교 목록
+    match /mathTour_schools/{sess} {
+      allow read: if signedIn();
+      allow write: if isTourAdmin();
+    }
+
+    // 로그인 열쇠: 정확한 열쇠를 아는 사람만 한 개씩 확인 가능 (목록 보기는 관리자만)
+    match /mathTour_logins/{key} {
+      allow get: if signedIn();
+      allow list, write: if isTourAdmin();
+      // 가족이 비밀번호를 바꿀 때: 우리 팀으로 가는 새 열쇠 만들기 (이미 있는 열쇠는 덮어쓸 수 없어요)
+      allow create: if isTeam(request.resource.data.teamId)
+        && request.resource.data.session == mySession().session
+        && request.resource.data.keys().hasOnly(['teamId', 'session', 'changedAt']);
+      // 예전 열쇠 지우기: 이 기기가 지금 로그인한 열쇠만
+      allow delete: if isTeam(resource.data.teamId) && mySession().key == key;
+    }
+
+    // 기기 ↔ 팀 연결: 올바른 로그인 열쇠를 가진 기기만 만들 수 있어요
+    match /mathTour_sessions/{uid} {
+      allow read: if isTourAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && exists(/databases/$(database)/documents/mathTour_logins/$(request.resource.data.key))
+        && get(/databases/$(database)/documents/mathTour_logins/$(request.resource.data.key)).data.teamId == request.resource.data.teamId
+        && get(/databases/$(database)/documents/mathTour_logins/$(request.resource.data.key)).data.session == request.resource.data.session;
+      allow delete: if isTourAdmin();
+    }
+
+    // 팀 공개 정보(A팀…·진행 상황): 가족은 자기 팀의 진행 상황만 바꿀 수 있어요
+    match /mathTour_teams/{teamId} {
+      allow read: if signedIn();
+      allow create, delete: if isTourAdmin();
+      allow update: if isTourAdmin() || (
+        isTeam(teamId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['solved', 'current', 'updatedAt'])
+      );
+    }
+
+    // 학교·학생 이름·비밀번호: 관리자만 (가족은 비밀번호 바꾸기만)
+    match /mathTour_teamsPrivate/{teamId} {
+      allow read, write: if isTourAdmin();
+      // 가족이 비밀번호를 바꾸면 선생님 명단의 번호도 함께 바뀌어요 (읽기는 여전히 관리자만)
+      allow update: if isTeam(teamId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pw', 'key', 'pwChangedAt']);
+    }
+
+    // 답: 같은 시간대 가족이 엿볼 수 있게 읽기 허용, 쓰기는 자기 팀 답만
+    match /mathTour_answers/{answerId} {
+      allow read: if signedIn();
+      allow create, update: if isTourAdmin() || (
+        isTeam(request.resource.data.teamId)
+        && request.resource.data.session == mySession().session
+        && answerId == request.resource.data.teamId + '_' + request.resource.data.qid
+      );
+      allow delete: if isTourAdmin();
+    }
+
+    // 만족도·펜토미노 걸린 시간: 관리자만 읽기
+    // (펜토미노 시간은 관리자가 '공개'로 바꾸면 가족도 읽을 수 있어요)
+    match /mathTour_private/{pid} {
+      allow read: if isTourAdmin() || (
+        signedIn() && resource.data.kind == 'pentoTime' && tourConfig().pentoTimePublic == true
+      );
+      allow create, update: if isTourAdmin() || (
+        isTeam(request.resource.data.teamId)
+        && request.resource.data.session == mySession().session
+        && pid == request.resource.data.teamId + '_' + request.resource.data.qid
+      );
+      allow delete: if isTourAdmin();
+    }
+
+    // ───────── 울타리치기 (fence_) ─────────
+    // 선생님: 비밀번호를 아는 기기만 fence_teachers에 자기 문서를 만들 수 있어요 (비밀번호는 해시로만 비교)
+    function isFenceTeacher() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/fence_teachers/$(request.auth.uid));
+    }
+    match /fence_teachers/{uid} {
+      allow get: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['k', 'at'])
+        && request.resource.data.k is string
+        && hashing.sha256(request.resource.data.k).toHexString().lower() == 'b714e02a6b867ad40d81540b87405f8ec7e10f0613177dfa1b2e3b8d1a5bdda1';
+    }
+
+    // 게임방: 접속한 누구나 보기, 선생님만 만들기·바꾸기
+    match /fence_rooms/{code} {
+      allow read: if request.auth != null;
+      allow write: if isFenceTeacher();
+
+      function fenceRoom() {
+        return get(/databases/$(database)/documents/fence_rooms/$(code)).data;
+      }
+
+      // 학생: 이름으로 입장(같은 이름이면 이어하기), 그리던 선 저장, 라운드마다 한 번만 제출
+      // 점수·채점 결과는 선생님 화면만 쓸 수 있어요
+      match /players/{pid} {
+        allow read: if request.auth != null;
+        allow delete: if isFenceTeacher();
+        allow create: if isFenceTeacher() || (
+          request.auth != null
+          && exists(/databases/$(database)/documents/fence_rooms/$(code))
+          && pid.size() >= 1 && pid.size() <= 10
+          && request.resource.data.keys().hasOnly(['name', 'uid', 'score', 'edges', 'joinedAt', 'lastSeen'])
+          && request.resource.data.name == pid
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.score == 0
+          && request.resource.data.edges is string
+        );
+        allow update: if isFenceTeacher() || (
+          request.auth != null
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid', 'edges', 'sub', 'lastSeen'])
+          && request.resource.data.edges is string
+          && request.resource.data.edges.size() <= 200
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['sub'])
+            || (
+              request.resource.data.sub.keys().hasOnly(['round', 'edges', 'at'])
+              && request.resource.data.sub.at == request.time
+              && request.resource.data.sub.edges is string
+              && request.resource.data.sub.edges.size() <= 200
+              && fenceRoom().status == 'playing'
+              && request.resource.data.sub.round == fenceRoom().round
+              && (!('sub' in resource.data) || resource.data.sub.round != request.resource.data.sub.round)
+            )
+          )
+        );
+      }
+    }
+  }
+}
