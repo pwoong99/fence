@@ -8,7 +8,7 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gsta
 import { PUZZLES } from "./puzzles.js";
 import { Board, checkSolution, diagnose, encodeEdges, decodeEdges, decodeAnswer } from "./board.js";
 
-const VERSION = "v1.2";
+const VERSION = "v1.21";
 
 const firebaseConfig = {
   apiKey: "AIzaSyD4CIUitbAtrNVc9rwnojFrTPlljwzp1l4",
