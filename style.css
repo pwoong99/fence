@@ -252,8 +252,12 @@ h3 { margin: 0 0 10px; font-size: 1.2rem; }
 .big-rank .sc { font-family: "Jua"; font-weight: 400; color: var(--pink-d); }
 .modal { background: #fff; border-radius: 24px; padding: 22px; width: min(400px, 100%); border: 3px solid var(--line); }
 .modal p { font-size: 1.15rem; font-weight: 700; line-height: 1.5; white-space: pre-line; margin-top: 0; }
-.modal .hint { font-size: .9rem; color: var(--muted); font-weight: 500; }
+.modal .hint { font-size: .9rem; color: var(--muted); font-weight: 500; white-space: normal; }
 .modal label { display: block; font-weight: 700; margin-bottom: 12px; }
+.modal label.check { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.modal label.check input { width: 22px; height: 22px; margin: 0; display: inline-block; }
+.modal label.check small { flex-basis: 100%; color: var(--muted); font-weight: 500; }
+#ptsPreview { background: #f6f8fe; border-radius: 12px; padding: 8px 10px; }
 .modal-btns { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
 .modal-btns .btn { min-width: 90px; }
 

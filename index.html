@@ -117,7 +117,8 @@
           <li>숫자가 없는 칸은 몇 개인지 알려 주지 않아요.</li>
           <li>울타리는 <b>끊기지 않고 하나로 닫혀야</b> 해요. 두 개로 나뉘면 안 돼요.</li>
           <li>모든 점을 쓸 필요는 없어요.</li>
-          <li>제출은 <b>딱 한 번</b>! 틀리면 0점, 빨리 맞힐수록 점수가 커요.</li>
+          <li>제출은 <b>딱 한 번</b>! 틀리면 0점이에요.</li>
+          <li>맞히면 <b>기본 점수</b>, 빨리 맞힌 친구는 <b>보너스</b>! 어려운 단계일수록 점수가 커져요.</li>
         </ul>
       </div>
     </div>
@@ -229,9 +230,14 @@
 <div id="ptsModal" class="overlay hidden">
   <div class="modal">
     <h3>⚙️ 점수 설정</h3>
-    <p class="hint">정답을 맞힌 순서대로 1등 점수에서 1점씩 줄어들고,<br>시간 안에 맞히면 최소 점수는 꼭 받아요.</p>
-    <label>1등 점수 <input id="ptsFirst" type="number" min="1" max="100"></label>
-    <label>최소 점수 <input id="ptsMin" type="number" min="0" max="100"></label>
+    <p class="hint">시간 안에 맞히면 <b>기본 점수</b>를 받고, 빨리 맞힌 학생은 <b>보너스</b>를 더 받아요.<br>
+      (보너스 등수가 5명이면 1등 +5, 2등 +4 … 5등 +1)<br>
+      단계 배율을 켜면 어려운 단계일수록 점수가 커져요.</p>
+    <label>기본 점수 (맞히면) <input id="ptsBase" type="number" min="1" max="100"></label>
+    <label>보너스 받는 등수 (몇 등까지) <input id="ptsTop" type="number" min="0" max="30"></label>
+    <label class="check"><input id="ptsMult" type="checkbox"> 단계 배율 쓰기
+      <small>연습 ×0.5 · 1~2단계 ×1 · 3~4단계 ×1.5 · 5~6단계 ×2 · 7~8단계 ×3</small></label>
+    <p class="hint" id="ptsPreview"></p>
     <div class="modal-btns">
       <button class="btn ghost" id="ptsCancel">취소</button>
       <button class="btn primary" id="ptsSave">저장</button>

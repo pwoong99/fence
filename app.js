@@ -8,7 +8,7 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gsta
 import { PUZZLES } from "./puzzles.js";
 import { Board, checkSolution, diagnose, encodeEdges, decodeEdges, decodeAnswer } from "./board.js";
 
-const VERSION = "v1.1";
+const VERSION = "v1.2";
 
 const firebaseConfig = {
   apiKey: "AIzaSyD4CIUitbAtrNVc9rwnojFrTPlljwzp1l4",
@@ -24,7 +24,14 @@ const auth = getAuth(fbApp);
 
 // 단계: 연습1·연습2(3×3) → 1~8단계(4×4~7×7)
 const DEFAULT_TIMES = [60, 90, 120, 120, 180, 180, 240, 240, 360, 360];
-const DEFAULT_PTS = { first: 10, min: 3 };
+// 점수: 맞히면 기본 점수 + 빠른 순서 보너스(1등 +top … top등 +1), 단계 배율을 곱함
+const DEFAULT_PTS = { base: 10, top: 5, mult: true };
+const LEVEL_MULT = [0.5, 0.5, 1, 1, 1.5, 1.5, 2, 2, 3, 3];
+function calcPoints(P, rank, level) {
+  const bonus = Math.max(0, P.top - (rank - 1));
+  const m = P.mult ? (LEVEL_MULT[level - 1] || 1) : 1;
+  return Math.round((P.base + bonus) * m);
+}
 const GRACE_MS = 1500;          // 제출 시간 여유
 const EST = { serverTimestamps: "estimate" };
 
@@ -546,7 +553,14 @@ const times = () => {
   const t = T.room && T.room.times;
   return Array.isArray(t) && t.length === PUZZLES.length ? t : DEFAULT_TIMES;
 };
-const pts = () => ({ ...DEFAULT_PTS, ...((T.room && T.room.pts) || {}) });
+const pts = () => {
+  const p = (T.room && T.room.pts) || {};
+  return {
+    base: Number.isFinite(p.base) ? p.base : DEFAULT_PTS.base,
+    top: Number.isFinite(p.top) ? p.top : DEFAULT_PTS.top,
+    mult: typeof p.mult === "boolean" ? p.mult : DEFAULT_PTS.mult
+  };
+};
 
 function playerState(p, r) {
   if (!r || r.round < 1) return { cls: "", txt: "대기 중" };
@@ -571,7 +585,7 @@ function renderTeacher() {
   $("levelBtns").innerHTML = PUZZLES.map((L, i) => {
     const lv = i + 1, info = levelInfo(lv);
     return `<button class="level-btn ${info.tut ? "tut" : ""} ${lv === T.sel ? "active" : ""}" data-lv="${lv}" ${playing ? "disabled" : ""}>
-      <b>${info.tut ? "🐣 " : ""}${info.name}</b>${info.size}<br><small>${info.kind} · ${fmtTime(times()[i])}</small></button>`;
+      <b>${info.tut ? "🐣 " : ""}${info.name}</b>${info.size}<br><small>${info.kind} · ${fmtTime(times()[i])}${pts().mult ? ` · ×${LEVEL_MULT[i]}` : ""}</small></button>`;
   }).join("");
   $("timeLabel").textContent = fmtTime(times()[T.sel - 1]);
   $("timeMinus").disabled = $("timePlus").disabled = playing;
@@ -667,8 +681,7 @@ async function gradeOne(p, round) {
   let rank = 0, points = 0;
   if (ok) {
     rank = correctCount(round) + 1;
-    const P = pts();
-    points = Math.max(P.min, P.first - (rank - 1));
+    points = calcPoints(pts(), rank, r.level);
   }
   const result = { round, correct: ok, rank, points, reason: ok ? "ok" : late ? "late" : "wrong" };
   T.graded.set(round + "|" + p.id, result);
@@ -756,16 +769,33 @@ $("tRankBtn").addEventListener("click", () => { renderBigRank(); $("rankOverlay"
 $("rankClose").addEventListener("click", () => $("rankOverlay").classList.add("hidden"));
 $("tPtsBtn").addEventListener("click", () => {
   const P = pts();
-  $("ptsFirst").value = P.first; $("ptsMin").value = P.min;
+  $("ptsBase").value = P.base; $("ptsTop").value = P.top; $("ptsMult").checked = P.mult;
+  ptsPreview();
   $("ptsModal").classList.remove("hidden");
 });
 $("ptsCancel").addEventListener("click", () => $("ptsModal").classList.add("hidden"));
+function readPts() {
+  return {
+    base: Math.round(Number($("ptsBase").value)),
+    top: Math.round(Number($("ptsTop").value)),
+    mult: $("ptsMult").checked
+  };
+}
+function ptsPreview() {
+  const P = readPts();
+  if (!(P.base >= 1 && P.top >= 0)) { $("ptsPreview").textContent = ""; return; }
+  const lv = T.sel || 3, I = levelInfo(lv);
+  const ranks = [1, 2, 3, P.top + 1].filter((v, k, a) => a.indexOf(v) === k);
+  $("ptsPreview").textContent = `예) ${I.name}: ` + ranks.map((r) => `${r === P.top + 1 ? `${r}등부터` : `${r}등`} ${calcPoints(P, r, lv)}점`).join(" · ") + " · 오답 0점";
+}
+["ptsBase", "ptsTop", "ptsMult"].forEach((id) => $(id).addEventListener("input", ptsPreview));
 $("ptsSave").addEventListener("click", async () => {
-  const first = Math.round(Number($("ptsFirst").value)), min = Math.round(Number($("ptsMin").value));
-  if (!(first >= 1 && first <= 100 && min >= 0 && min <= first)) return toast("1등 점수는 1~100, 최소 점수는 0~1등 점수 사이로 정해 주세요.");
-  try { await updateDoc(T.roomRef, { pts: { first, min } }); $("ptsModal").classList.add("hidden"); toast("점수 설정을 저장했어요."); }
+  const P = readPts();
+  if (!(P.base >= 1 && P.base <= 100 && P.top >= 0 && P.top <= 30)) return toast("기본 점수는 1~100, 보너스 등수는 0~30으로 정해 주세요.");
+  try { await updateDoc(T.roomRef, { pts: P }); $("ptsModal").classList.add("hidden"); toast("점수 설정을 저장했어요."); }
   catch (e) { toast("저장하지 못했어요."); }
 });
+
 $("tResetBtn").addEventListener("click", async () => {
   if (T.room && T.room.status === "playing") return toast("라운드가 끝난 뒤에 초기화할 수 있어요.");
   if (!(await confirmBox("모든 학생의 점수를 0점으로 되돌릴까요?", "초기화"))) return;
