@@ -258,6 +258,17 @@ h3 { margin: 0 0 10px; font-size: 1.2rem; }
 .modal label.check input { width: 22px; height: 22px; margin: 0; display: inline-block; }
 .modal label.check small { flex-basis: 100%; color: var(--muted); font-weight: 500; }
 #ptsPreview { background: #f6f8fe; border-radius: 12px; padding: 8px 10px; }
+.modal.wide { width: min(620px, 100%); max-height: 92vh; overflow: auto; }
+.memo-chip { background: #e6f8ef; color: var(--mint-d); }
+.new-room { display: flex; gap: 8px; margin-bottom: 12px; }
+.new-room input { margin: 0; font-size: 1.05rem; padding: 12px; flex: 1; }
+.room-list { display: flex; flex-direction: column; gap: 8px; }
+.room-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 16px; background: #f6f8fe; border: 2.5px solid transparent; flex-wrap: wrap; }
+.room-item.current { border-color: var(--blue); background: #eef4ff; }
+.room-item .rc { font-family: "Jua"; font-size: 1.7rem; color: var(--pink-d); letter-spacing: .08em; min-width: 72px; }
+.room-item .memo-in { flex: 1; min-width: 150px; margin: 0; font-size: 1.05rem; padding: 10px 12px; }
+.room-item .meta { flex-basis: 100%; color: var(--muted); font-size: .82rem; font-weight: 600; }
+.room-item .now { font-family: "Jua"; color: var(--blue); }
 .modal-btns { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
 .modal-btns .btn { min-width: 90px; }
 

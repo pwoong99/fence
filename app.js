@@ -1,14 +1,14 @@
 // 울타리치기 — 학생 경쟁 게임 (GitHub Pages + Firebase webapp-hub 프로젝트, fence_ 컬렉션)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getFirestore, doc, collection, getDoc, getDocFromServer, setDoc, updateDoc, deleteDoc,
+  getFirestore, doc, collection, getDoc, getDocs, getDocFromServer, setDoc, updateDoc, deleteDoc,
   onSnapshot, serverTimestamp, increment, arrayUnion, writeBatch, deleteField
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { PUZZLES } from "./puzzles.js";
 import { Board, checkSolution, diagnose, encodeEdges, decodeEdges, decodeAnswer } from "./board.js";
 
-const VERSION = "v1.21";
+const VERSION = "v1.3";
 
 const firebaseConfig = {
   apiKey: "AIzaSyD4CIUitbAtrNVc9rwnojFrTPlljwzp1l4",
@@ -240,7 +240,9 @@ async function joinStudent(code, name) {
 
   ST.unsubs.push(onSnapshot(roomRef, (s) => {
     if (!s.exists()) return leaveStudent("선생님이 방을 닫았어요.");
-    ST.room = s.data(EST); renderStudent();
+    ST.room = s.data(EST);
+    $("stRoom").textContent = `방 ${code}${ST.room.memo ? " · " + ST.room.memo : ""}`;
+    renderStudent();
   }));
   ST.unsubs.push(onSnapshot(pRef, (s) => {
     if (!s.exists()) { if (ST.joined) leaveStudent("선생님이 방에서 내보냈어요. 다시 입장할 수 있어요."); return; }
@@ -504,14 +506,14 @@ async function teacherLogin(pw) {
   startTeacher(code);
 }
 
-async function createRoom() {
+async function createRoom(memo = "") {
   for (let i = 0; i < 20; i++) {
     const code = String(1000 + Math.floor(Math.random() * 9000));
     const ref = doc(db, "fence_rooms", code);
     const s = await getDoc(ref);
     if (s.exists()) continue;
     await setDoc(ref, {
-      status: "waiting", round: 0, level: 1, times: DEFAULT_TIMES, pts: DEFAULT_PTS, used: {},
+      status: "waiting", round: 0, level: 1, times: DEFAULT_TIMES, pts: DEFAULT_PTS, used: {}, memo: String(memo).slice(0, 30),
       createdAt: serverTimestamp(), touchedAt: serverTimestamp()
     });
     return code;
@@ -536,6 +538,8 @@ async function startTeacher(code) {
   T.unsubs.push(onSnapshot(roomRef, (s) => {
     if (!s.exists()) return;
     T.room = s.data(EST);
+    $("tMemo").textContent = T.room.memo || "";
+    $("tMemo").classList.toggle("hidden", !T.room.memo);
     if (T.sel === null || T.sel > PUZZLES.length) T.sel = Math.min(T.room.level || 1, PUZZLES.length);
     renderTeacher();
     gradePending();
@@ -807,9 +811,95 @@ $("tResetBtn").addEventListener("click", async () => {
     toast("점수를 초기화했어요.");
   } catch (e) { console.error(e); toast("초기화하지 못했어요."); }
 });
-$("tNewRoomBtn").addEventListener("click", async () => {
-  if (!(await confirmBox("새 방을 만들까요?\n학생들은 새 방 번호로 다시 들어와야 해요.", "새 방 만들기"))) return;
-  try { const code = await createRoom(); startTeacher(code); }
-  catch (e) { toast(e.userMsg || "새 방을 만들지 못했어요."); }
+// ----- 방 관리: 여러 방을 두고 바꿔 쓰기, 방마다 메모 -----
+const fmtDate = (t) => { const d = new Date(t); return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`; };
+async function renderRooms() {
+  const box = $("roomList");
+  box.innerHTML = `<div class="empty">방 목록을 불러오는 중…</div>`;
+  try {
+    const qs = await getDocs(collection(db, "fence_rooms"));
+    const rooms = qs.docs.map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (a.id === T.code ? -1 : b.id === T.code ? 1 : (ms(b.touchedAt) || 0) - (ms(a.touchedAt) || 0)));
+    box.innerHTML = rooms.map((r) => {
+      const cur = r.id === T.code;
+      const made = ms(r.createdAt), used = ms(r.touchedAt);
+      return `<div class="room-item ${cur ? "current" : ""}">
+        <span class="rc">${esc(r.id)}</span>
+        <input class="memo-in" data-memo="${esc(r.id)}" maxlength="30" placeholder="메모 (예: 6학년 3반)" value="${esc(r.memo || "")}">
+        ${cur ? `<span class="now">지금 방</span>` : `<button class="btn primary small" data-use="${esc(r.id)}">이 방으로</button>`}
+        <button class="btn ghost small" data-del="${esc(r.id)}">지우기</button>
+        <span class="meta">${made ? "만든 날 " + fmtDate(made) : ""}${used ? " · 마지막 사용 " + fmtDate(used) : ""} · ${r.round || 0}라운드 진행</span>
+      </div>`;
+    }).join("") || `<div class="empty">아직 방이 없어요.</div>`;
+  } catch (e) {
+    console.error(e);
+    box.innerHTML = `<div class="empty">방 목록을 불러오지 못했어요.</div>`;
+  }
+}
+async function saveMemo(input) {
+  const code = input.dataset.memo, memo = input.value.trim().slice(0, 30);
+  if (input.dataset.saved === memo) return;
+  try {
+    await updateDoc(doc(db, "fence_rooms", code), { memo });
+    input.dataset.saved = memo;
+    toast(`방 ${code} 메모를 저장했어요.`);
+  } catch (e) { toast("메모를 저장하지 못했어요."); }
+}
+async function leaveCurrentRoomOk() {
+  if (T.room && T.room.status === "playing") {
+    return confirmBox("지금 라운드가 진행 중이에요.\n방을 바꾸면 이 라운드 채점이 멈춰요. 그래도 바꿀까요?", "바꾸기");
+  }
+  return true;
+}
+$("tNewRoomBtn").addEventListener("click", () => {
+  $("newRoomMemo").value = "";
+  $("roomsModal").classList.remove("hidden");
+  renderRooms();
+});
+$("roomsClose").addEventListener("click", () => $("roomsModal").classList.add("hidden"));
+$("roomList").addEventListener("focusin", (e) => {
+  const inp = e.target.closest("[data-memo]");
+  if (inp && inp.dataset.saved === undefined) inp.dataset.saved = inp.value.trim();
+});
+$("roomList").addEventListener("change", (e) => { const inp = e.target.closest("[data-memo]"); if (inp) saveMemo(inp); });
+$("roomList").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.closest("[data-memo]")) e.target.blur(); });
+$("roomList").addEventListener("click", async (e) => {
+  const use = e.target.closest("[data-use]"), del = e.target.closest("[data-del]");
+  if (use) {
+    if (!(await leaveCurrentRoomOk())) return;
+    $("roomsModal").classList.add("hidden");
+    startTeacher(use.dataset.use);
+    toast(`방 ${use.dataset.use}(으)로 바꿨어요.`);
+  } else if (del) {
+    const code = del.dataset.del, cur = code === T.code;
+    if (cur && T.room && T.room.status === "playing") return toast("라운드가 끝난 뒤에 지울 수 있어요.");
+    if (!(await confirmBox(`방 ${code}을(를) 지울까요?\n학생 점수도 모두 지워지고, 되돌릴 수 없어요.`, "지우기"))) return;
+    try {
+      const ps = await getDocs(collection(db, "fence_rooms", code, "players"));
+      const batch = writeBatch(db);
+      ps.docs.forEach((d) => batch.delete(doc(db, "fence_rooms", code, "players", d.id)));
+      batch.delete(doc(db, "fence_rooms", code));
+      if (cur) stopTeacher();
+      await batch.commit();
+      toast(`방 ${code}을(를) 지웠어요.`);
+      if (cur) {
+        const left = await getDocs(collection(db, "fence_rooms"));
+        const next = left.docs.length ? left.docs[0].id : await createRoom();
+        startTeacher(next);
+      }
+      renderRooms();
+    } catch (e) { console.error(e); toast("방을 지우지 못했어요."); }
+  }
+});
+$("newRoomBtn").addEventListener("click", async () => {
+  if (!(await leaveCurrentRoomOk())) return;
+  $("newRoomBtn").disabled = true;
+  try {
+    const code = await createRoom($("newRoomMemo").value.trim());
+    $("roomsModal").classList.add("hidden");
+    startTeacher(code);
+    toast(`새 방 ${code}을(를) 만들었어요.`);
+  } catch (e) { toast(e.userMsg || "새 방을 만들지 못했어요."); }
+  finally { $("newRoomBtn").disabled = false; }
 });
 $("tLeave").addEventListener("click", () => { stopTeacher(); showScreen("entry"); });
